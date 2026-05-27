@@ -20,6 +20,8 @@ public partial class App : System.Windows.Application
                 IReadOnlyList<Models.ChineseTextRecord> records = await scanner.ScanAsync(
                     commandLineRun.ProjectPath,
                     commandLineRun.IncludeLikelyThirdParty,
+                    commandLineRun.ExcludedFiles,
+                    commandLineRun.ExcludedFolders,
                     null,
                     CancellationToken.None);
 
@@ -48,6 +50,8 @@ public partial class App : System.Windows.Application
         string? projectPath = null;
         string? outputPath = null;
         bool includeThirdParty = false;
+        List<string> excludedFiles = [];
+        List<string> excludedFolders = [];
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -69,6 +73,16 @@ public partial class App : System.Windows.Application
             {
                 includeThirdParty = true;
             }
+            else if (arg.Equals("--exclude-file", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                excludedFiles.Add(args[++i]);
+            }
+            else if ((arg.Equals("--exclude-folder", StringComparison.OrdinalIgnoreCase)
+                      || arg.Equals("--exclude-dir", StringComparison.OrdinalIgnoreCase))
+                     && i + 1 < args.Length)
+            {
+                excludedFolders.Add(args[++i]);
+            }
         }
 
         if (string.IsNullOrWhiteSpace(projectPath))
@@ -80,7 +94,7 @@ public partial class App : System.Windows.Application
             outputPath = Path.Combine(exportDirectory, $"ChineseTextReport_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx");
         }
 
-        run = new CommandLineRun(projectPath, outputPath, includeThirdParty);
+        run = new CommandLineRun(projectPath, outputPath, includeThirdParty, excludedFiles, excludedFolders);
         return true;
     }
 
@@ -102,5 +116,10 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private sealed record CommandLineRun(string ProjectPath, string OutputPath, bool IncludeLikelyThirdParty);
+    private sealed record CommandLineRun(
+        string ProjectPath,
+        string OutputPath,
+        bool IncludeLikelyThirdParty,
+        IReadOnlyCollection<string> ExcludedFiles,
+        IReadOnlyCollection<string> ExcludedFolders);
 }

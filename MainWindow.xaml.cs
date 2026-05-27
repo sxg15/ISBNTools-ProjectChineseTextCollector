@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using Microsoft.Win32;
 using ProjectChineseTextCollector.Models;
 using ProjectChineseTextCollector.Services;
@@ -87,6 +88,8 @@ public partial class MainWindow : Window
             IReadOnlyList<ChineseTextRecord> result = await scanner.ScanAsync(
                 projectPath,
                 IncludeThirdPartyCheckBox.IsChecked == true,
+                GetExclusionItems(ExcludedFilesListBox),
+                GetExclusionItems(ExcludedFoldersListBox),
                 progress,
                 CancellationToken.None);
 
@@ -111,6 +114,48 @@ public partial class MainWindow : Window
         {
             SetBusy(false);
         }
+    }
+
+    private void AddExcludedFilesButton_Click(object sender, RoutedEventArgs e)
+    {
+        Microsoft.Win32.OpenFileDialog dialog = new()
+        {
+            Title = "选择要排除的文件",
+            Multiselect = true,
+            InitialDirectory = GetDialogInitialDirectory()
+        };
+
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        foreach (string fileName in dialog.FileNames)
+            AddUniqueExclusionItem(ExcludedFilesListBox, ToProjectRelativeItem(fileName));
+    }
+
+    private void AddExcludedFoldersButton_Click(object sender, RoutedEventArgs e)
+    {
+        Microsoft.Win32.OpenFolderDialog dialog = new()
+        {
+            Title = "选择要排除的文件夹",
+            Multiselect = true,
+            InitialDirectory = GetDialogInitialDirectory()
+        };
+
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        foreach (string folderName in dialog.FolderNames)
+            AddUniqueExclusionItem(ExcludedFoldersListBox, ToProjectRelativeItem(folderName));
+    }
+
+    private void RemoveExcludedFilesButton_Click(object sender, RoutedEventArgs e)
+    {
+        RemoveSelectedExclusionItems(ExcludedFilesListBox);
+    }
+
+    private void RemoveExcludedFoldersButton_Click(object sender, RoutedEventArgs e)
+    {
+        RemoveSelectedExclusionItems(ExcludedFoldersListBox);
     }
 
     private void ExportButton_Click(object sender, RoutedEventArgs e)
@@ -167,6 +212,9 @@ public partial class MainWindow : Window
     {
         string selectedTab = (ResultsTabControl.SelectedItem as TabItem)?.Tag as string ?? AllTabName;
         List<ChineseTextRecord> filtered = FilterRecordsByKeyword(allRecords).ToList();
+        if (DeduplicateCheckBox.IsChecked == true)
+            filtered = DeduplicateRecords(filtered);
+
         List<ResultTabData> tabs = BuildTabData(filtered);
 
         ResultsTabControl.SelectionChanged -= ResultsTabControl_SelectionChanged;
@@ -208,6 +256,82 @@ public partial class MainWindow : Window
             || record.Category.Contains(keyword, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static List<ChineseTextRecord> DeduplicateRecords(IEnumerable<ChineseTextRecord> records)
+    {
+        HashSet<string> seenTexts = new(StringComparer.Ordinal);
+        List<ChineseTextRecord> deduplicated = [];
+        foreach (ChineseTextRecord record in records)
+        {
+            if (seenTexts.Add(record.Text))
+                deduplicated.Add(record);
+        }
+
+        return deduplicated;
+    }
+
+    private static IReadOnlyList<string> GetExclusionItems(System.Windows.Controls.ListBox listBox)
+    {
+        return listBox.Items
+            .OfType<string>()
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToList();
+    }
+
+    private static void AddUniqueExclusionItem(System.Windows.Controls.ListBox listBox, string item)
+    {
+        if (string.IsNullOrWhiteSpace(item))
+            return;
+
+        bool exists = listBox.Items
+            .OfType<string>()
+            .Any(existing => string.Equals(existing, item, StringComparison.OrdinalIgnoreCase));
+        if (!exists)
+            listBox.Items.Add(item);
+    }
+
+    private static void RemoveSelectedExclusionItems(System.Windows.Controls.ListBox listBox)
+    {
+        List<object> selectedItems = listBox.SelectedItems.Cast<object>().ToList();
+        foreach (object item in selectedItems)
+            listBox.Items.Remove(item);
+    }
+
+    private string GetDialogInitialDirectory()
+    {
+        string projectPath = ProjectPathTextBox.Text.Trim();
+        if (Directory.Exists(projectPath))
+            return projectPath;
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+    }
+
+    private string ToProjectRelativeItem(string path)
+    {
+        string projectPath = ProjectPathTextBox.Text.Trim();
+        if (!Directory.Exists(projectPath))
+            return path;
+
+        try
+        {
+            string relativePath = Path.GetRelativePath(projectPath, path);
+            if (!relativePath.StartsWith("..", StringComparison.Ordinal)
+                && !Path.IsPathRooted(relativePath))
+            {
+                return relativePath;
+            }
+        }
+        catch (ArgumentException)
+        {
+            return path;
+        }
+        catch (NotSupportedException)
+        {
+            return path;
+        }
+
+        return path;
+    }
+
     private static List<ResultTabData> BuildTabData(List<ChineseTextRecord> filtered)
     {
         Dictionary<string, List<ChineseTextRecord>> bySourceType = filtered
@@ -243,34 +367,221 @@ public partial class MainWindow : Window
             IsReadOnly = true,
             RowHeaderWidth = 0,
             SelectionMode = System.Windows.Controls.DataGridSelectionMode.Extended,
+            SelectionUnit = System.Windows.Controls.DataGridSelectionUnit.CellOrRowHeader,
+            ClipboardCopyMode = System.Windows.Controls.DataGridClipboardCopyMode.IncludeHeader,
             ItemsSource = records
         };
 
+        ScrollViewer.SetHorizontalScrollBarVisibility(grid, ScrollBarVisibility.Visible);
+        ScrollViewer.SetVerticalScrollBarVisibility(grid, ScrollBarVisibility.Auto);
+        grid.PreviewKeyDown += RecordsGrid_PreviewKeyDown;
+        grid.PreviewMouseRightButtonDown += RecordsGrid_PreviewMouseRightButtonDown;
+        grid.CommandBindings.Add(new CommandBinding(
+            ApplicationCommands.Copy,
+            CopyRecordsGridSelection_Executed,
+            CopyRecordsGridSelection_CanExecute));
+
+        System.Windows.Controls.ContextMenu contextMenu = new();
+        System.Windows.Controls.MenuItem copyMenuItem = new()
+        {
+            Header = "复制选中"
+        };
+        copyMenuItem.Click += (_, _) => CopyRecordsGridToClipboard(grid);
+        contextMenu.Items.Add(copyMenuItem);
+        grid.ContextMenu = contextMenu;
+
         grid.Columns.Add(CreateTextColumn("#", nameof(ChineseTextRecord.Id), 56));
-        grid.Columns.Add(CreateTextColumn("中文内容", nameof(ChineseTextRecord.Text), 2, true));
+        grid.Columns.Add(CreateTextColumn("中文内容", nameof(ChineseTextRecord.Text), 420));
         grid.Columns.Add(CreateTextColumn("来源类型", nameof(ChineseTextRecord.SourceType), 130));
         grid.Columns.Add(CreateTextColumn("分类", nameof(ChineseTextRecord.Category), 150));
         grid.Columns.Add(CreateTextColumn("可信度", nameof(ChineseTextRecord.Confidence), 80));
         grid.Columns.Add(CreateTextColumn("是否乱码", nameof(ChineseTextRecord.GarbledStatus), 86));
         grid.Columns.Add(CreateTextColumn("乱码判断", nameof(ChineseTextRecord.GarbledReason), 180));
-        grid.Columns.Add(CreateTextColumn("文件路径", nameof(ChineseTextRecord.RelativePath), 2, true));
+        grid.Columns.Add(CreateTextColumn("文件路径", nameof(ChineseTextRecord.RelativePath), 640));
         grid.Columns.Add(CreateTextColumn("行", nameof(ChineseTextRecord.LineNumber), 70));
         grid.Columns.Add(CreateTextColumn("字段", nameof(ChineseTextRecord.FieldName), 130));
         grid.Columns.Add(CreateTextColumn("对象/资源名", nameof(ChineseTextRecord.ObjectPath), 150));
-        grid.Columns.Add(CreateTextColumn("备注", nameof(ChineseTextRecord.Notes), 220));
+        grid.Columns.Add(CreateTextColumn("备注", nameof(ChineseTextRecord.Notes), 360));
 
         return grid;
     }
 
-    private static System.Windows.Controls.DataGridTextColumn CreateTextColumn(string header, string bindingPath, double width, bool star = false)
+    private static void RecordsGrid_PreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.DataGrid grid
+            || e.OriginalSource is not DependencyObject source)
+        {
+            return;
+        }
+
+        System.Windows.Controls.DataGridCell? cell = FindVisualParent<System.Windows.Controls.DataGridCell>(source);
+        if (cell?.DataContext is not ChineseTextRecord record)
+            return;
+
+        cell.Focus();
+        System.Windows.Controls.DataGridCellInfo cellInfo = new(record, cell.Column);
+        grid.CurrentCell = cellInfo;
+        if (!grid.SelectedCells.Contains(cellInfo))
+        {
+            grid.SelectedCells.Clear();
+            grid.SelectedCells.Add(cellInfo);
+        }
+    }
+
+    private static void RecordsGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.DataGrid grid
+            || e.Key != Key.C
+            || (Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        {
+            return;
+        }
+
+        string text = BuildClipboardText(grid);
+        if (string.IsNullOrEmpty(text)
+            && grid.CurrentCell.Item is ChineseTextRecord currentRecord
+            && grid.CurrentCell.Column is not null)
+        {
+            text = GetColumnText(grid.CurrentCell.Column, currentRecord);
+        }
+
+        if (!string.IsNullOrEmpty(text))
+        {
+            System.Windows.Clipboard.SetText(text);
+            e.Handled = true;
+        }
+    }
+
+    private static void CopyRecordsGridToClipboard(System.Windows.Controls.DataGrid grid)
+    {
+        string text = BuildClipboardText(grid);
+        if (string.IsNullOrEmpty(text)
+            && grid.CurrentCell.Item is ChineseTextRecord currentRecord
+            && grid.CurrentCell.Column is not null)
+        {
+            text = GetColumnText(grid.CurrentCell.Column, currentRecord);
+        }
+
+        if (!string.IsNullOrEmpty(text))
+            System.Windows.Clipboard.SetText(text);
+    }
+
+    private static void CopyRecordsGridSelection_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.DataGrid grid)
+            return;
+
+        e.CanExecute = grid.SelectedCells.Count > 0
+                       || grid.SelectedItems.Count > 0
+                       || grid.CurrentCell.Item is ChineseTextRecord;
+        e.Handled = true;
+    }
+
+    private static void CopyRecordsGridSelection_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.DataGrid grid)
+            return;
+
+        string text = BuildClipboardText(grid);
+        if (string.IsNullOrEmpty(text)
+            && grid.CurrentCell.Item is ChineseTextRecord currentRecord
+            && grid.CurrentCell.Column is not null)
+        {
+            text = GetColumnText(grid.CurrentCell.Column, currentRecord);
+        }
+
+        if (!string.IsNullOrEmpty(text))
+            System.Windows.Clipboard.SetText(text);
+
+        e.Handled = true;
+    }
+
+    private static string BuildClipboardText(System.Windows.Controls.DataGrid grid)
+    {
+        if (grid.SelectedCells.Count > 0)
+        {
+            List<System.Windows.Controls.DataGridCellInfo> selectedCells = grid.SelectedCells
+                .Where(cell => cell.Item is ChineseTextRecord)
+                .OrderBy(cell => GetRecordGridIndex(grid, (ChineseTextRecord)cell.Item))
+                .ThenBy(cell => grid.Columns.IndexOf(cell.Column))
+                .ToList();
+
+            return BuildClipboardTextFromCells(grid, selectedCells);
+        }
+
+        List<ChineseTextRecord> selectedRows = grid.SelectedItems
+            .OfType<ChineseTextRecord>()
+            .OrderBy(record => GetRecordGridIndex(grid, record))
+            .ToList();
+
+        if (selectedRows.Count == 0)
+            return string.Empty;
+
+        return string.Join(
+            Environment.NewLine,
+            selectedRows.Select(record => string.Join("\t", grid.Columns.Select(column => GetColumnText(column, record)))));
+    }
+
+    private static string BuildClipboardTextFromCells(
+        System.Windows.Controls.DataGrid grid,
+        IReadOnlyList<System.Windows.Controls.DataGridCellInfo> selectedCells)
+    {
+        if (selectedCells.Count == 0)
+            return string.Empty;
+
+        List<string> lines = [];
+        foreach (IGrouping<ChineseTextRecord, System.Windows.Controls.DataGridCellInfo> rowGroup in selectedCells.GroupBy(cell => (ChineseTextRecord)cell.Item))
+        {
+            List<string> values = rowGroup
+                .OrderBy(cell => grid.Columns.IndexOf(cell.Column))
+                .Select(cell => GetColumnText(cell.Column, rowGroup.Key))
+                .ToList();
+            lines.Add(string.Join("\t", values));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static int GetRecordGridIndex(System.Windows.Controls.DataGrid grid, ChineseTextRecord record)
+    {
+        return grid.Items.IndexOf(record);
+    }
+
+    private static string GetColumnText(System.Windows.Controls.DataGridColumn column, ChineseTextRecord record)
+    {
+        if (column is not System.Windows.Controls.DataGridTextColumn textColumn
+            || textColumn.Binding is not System.Windows.Data.Binding binding
+            || string.IsNullOrWhiteSpace(binding.Path.Path))
+        {
+            return string.Empty;
+        }
+
+        object? value = typeof(ChineseTextRecord).GetProperty(binding.Path.Path)?.GetValue(record);
+        return value?.ToString() ?? string.Empty;
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject source)
+        where T : DependencyObject
+    {
+        DependencyObject? current = source;
+        while (current is not null)
+        {
+            if (current is T target)
+                return target;
+
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private static System.Windows.Controls.DataGridTextColumn CreateTextColumn(string header, string bindingPath, double width)
     {
         return new System.Windows.Controls.DataGridTextColumn
         {
             Header = header,
             Binding = new System.Windows.Data.Binding(bindingPath),
-            Width = star
-                ? new System.Windows.Controls.DataGridLength(width, System.Windows.Controls.DataGridLengthUnitType.Star)
-                : new System.Windows.Controls.DataGridLength(width)
+            Width = new System.Windows.Controls.DataGridLength(width)
         };
     }
 
@@ -285,7 +596,8 @@ public partial class MainWindow : Window
 
         string tabName = selectedTab.Tag as string ?? AllTabName;
         int deduplicatedCount = records.Select(record => record.Text).Distinct().Count();
-        SummaryTextBlock.Text = $"{tabName}：{records.Count} 条，去重后 {deduplicatedCount} 条；全部 {allRecords.Count} 条";
+        string deduplicateStatus = DeduplicateCheckBox.IsChecked == true ? "；当前为去重显示" : $"，去重后 {deduplicatedCount} 条";
+        SummaryTextBlock.Text = $"{tabName}：{records.Count} 条{deduplicateStatus}；全部 {allRecords.Count} 条";
     }
 
     private void SetBusy(bool isBusy)
@@ -293,6 +605,12 @@ public partial class MainWindow : Window
         ScanButton.IsEnabled = !isBusy;
         ExportButton.IsEnabled = !isBusy && allRecords.Count > 0;
         IncludeThirdPartyCheckBox.IsEnabled = !isBusy;
+        ExcludedFilesListBox.IsEnabled = !isBusy;
+        ExcludedFoldersListBox.IsEnabled = !isBusy;
+        AddExcludedFilesButton.IsEnabled = !isBusy;
+        RemoveExcludedFilesButton.IsEnabled = !isBusy;
+        AddExcludedFoldersButton.IsEnabled = !isBusy;
+        RemoveExcludedFoldersButton.IsEnabled = !isBusy;
         if (isBusy)
         {
             ScanProgressBar.Value = 0;

@@ -11,6 +11,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -59,6 +60,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
@@ -66,29 +68,124 @@
                       Grid.Column="0"
                       VerticalAlignment="Center"
                       Content="包含第三方/示例目录" />
-            <TextBlock Grid.Column="1"
+            <CheckBox x:Name="DeduplicateCheckBox"
+                      Grid.Column="1"
+                      Margin="18,0,0,0"
+                      VerticalAlignment="Center"
+                      Checked="Filter_Changed"
+                      Unchecked="Filter_Changed"
+                      Content="去重" />
+            <TextBlock Grid.Column="2"
                        Margin="18,0,0,0"
                        VerticalAlignment="Center"
                        Text="搜索" />
             <TextBox x:Name="SearchTextBox"
-                      Grid.Column="2"
+                      Grid.Column="3"
                       Width="260"
                       Height="30"
                      Margin="8,0,0,0"
                      VerticalContentAlignment="Center"
                      TextChanged="Filter_Changed" />
             <TextBlock x:Name="SummaryTextBlock"
-                       Grid.Column="3"
+                       Grid.Column="4"
                        VerticalAlignment="Center"
                        Margin="16,0,0,0"
                        Foreground="#3F4754" />
         </Grid>
 
+        <Border Grid.Row="2"
+                Margin="0,0,0,12"
+                Padding="10"
+                BorderBrush="#D6DCE5"
+                BorderThickness="1"
+                CornerRadius="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Grid Grid.Column="0" Margin="0,0,8,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0"
+                               Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Text="排除文件" />
+                    <Button x:Name="AddExcludedFilesButton"
+                            Grid.Row="0"
+                            Grid.Column="1"
+                            Width="88"
+                            Margin="8,0,0,0"
+                            Click="AddExcludedFilesButton_Click"
+                            Content="选择文件" />
+                    <Button x:Name="RemoveExcludedFilesButton"
+                            Grid.Row="0"
+                            Grid.Column="2"
+                            Width="72"
+                            Margin="8,0,0,0"
+                            Click="RemoveExcludedFilesButton_Click"
+                            Content="移除" />
+                    <ListBox x:Name="ExcludedFilesListBox"
+                             Grid.Row="1"
+                             Grid.ColumnSpan="3"
+                             Height="54"
+                             Margin="0,6,0,0"
+                             SelectionMode="Extended" />
+                </Grid>
+
+                <Grid Grid.Column="1" Margin="8,0,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0"
+                               Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Text="排除文件夹" />
+                    <Button x:Name="AddExcludedFoldersButton"
+                            Grid.Row="0"
+                            Grid.Column="1"
+                            Width="88"
+                            Margin="8,0,0,0"
+                            Click="AddExcludedFoldersButton_Click"
+                            Content="选择文件夹" />
+                    <Button x:Name="RemoveExcludedFoldersButton"
+                            Grid.Row="0"
+                            Grid.Column="2"
+                            Width="72"
+                            Margin="8,0,0,0"
+                            Click="RemoveExcludedFoldersButton_Click"
+                            Content="移除" />
+                    <ListBox x:Name="ExcludedFoldersListBox"
+                             Grid.Row="1"
+                             Grid.ColumnSpan="3"
+                             Height="54"
+                             Margin="0,6,0,0"
+                             SelectionMode="Extended" />
+                </Grid>
+            </Grid>
+        </Border>
+
         <TabControl x:Name="ResultsTabControl"
-                    Grid.Row="2"
+                    Grid.Row="3"
                     SelectionChanged="ResultsTabControl_SelectionChanged" />
 
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Margin="0,12,0,0"
                 Padding="10"
                 BorderBrush="#D6DCE5"
